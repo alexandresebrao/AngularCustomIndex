@@ -4,14 +4,15 @@ import {
   isMainModule,
   writeResponseToNodeResponse,
 } from '@angular/ssr/node';
-import express from 'express';
+import fastify from 'fastify';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import fastifyStatic from '@fastify/static'
 
 const serverDistFolder = dirname(fileURLToPath(import.meta.url));
 const browserDistFolder = resolve(serverDistFolder, '../browser');
 
-const app = express();
+const app = fastify();
 const angularApp = new AngularNodeAppEngine();
 
 /**
@@ -29,24 +30,20 @@ const angularApp = new AngularNodeAppEngine();
 /**
  * Serve static files from /browser
  */
-app.use(
-  express.static(browserDistFolder, {
-    maxAge: '1y',
-    index: false,
-    redirect: false,
-  }),
-);
+app.register(fastifyStatic, { root: browserDistFolder, wildcard: false })
 
 /**
  * Handle all other requests by rendering the Angular application.
  */
-app.use('/**', (req, res, next) => {
+app.get('*', (req, res) => {
   angularApp
-    .handle(req)
-    .then((response) =>
-      response ? writeResponseToNodeResponse(response, res) : next(),
+    .handle(req.raw, {user: {username: "test"}})
+    .then((response) =>{
+      console.log('im here')
+      response ? writeResponseToNodeResponse(response, res.raw) : null
+    }
     )
-    .catch(next);
+    .catch(null);
 });
 
 /**
@@ -54,8 +51,8 @@ app.use('/**', (req, res, next) => {
  * The server listens on the port defined by the `PORT` environment variable, or defaults to 4000.
  */
 if (isMainModule(import.meta.url)) {
-  const port = process.env['PORT'] || 4000;
-  app.listen(port, () => {
+  const port = parseInt(process.env['PORT'] as string) || 4000;
+  app.listen({port}, () => {
     console.log(`Node Express server listening on http://localhost:${port}`);
   });
 }
@@ -63,4 +60,8 @@ if (isMainModule(import.meta.url)) {
 /**
  * The request handler used by the Angular CLI (dev-server and during build).
  */
-export const reqHandler = createNodeRequestHandler(app);
+
+export const reqHandler = createNodeRequestHandler(async (req, res) => {
+  await app.ready()
+  app.server.emit('request', req, res)
+})
